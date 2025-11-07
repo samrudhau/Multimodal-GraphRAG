@@ -44,10 +44,12 @@ class KnowledgeGraph(BaseModel):
 class OllamaKnowledgeGraphExtractor:
     def __init__(self, model_name="llama3"):
         self.model_name = model_name
-        # The client automatically connects to the local Ollama service
-        self.client = ollama.Client() 
-        print(f"🤖 Initialized Ollama client with model '{self.model_name}'")
 
+        # NEW: Read Ollama host from environment variable, fallback to localhost
+        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self.client = ollama.Client(host=ollama_host)
+        print(f"Initialized Ollama client with model '{self.model_name}' at {ollama_host}")
+    
     def _generate_prompt(self, text: str):
         # We provide the Pydantic schema and one example to guide the model.
         # This is a form of "one-shot" prompting.
@@ -86,7 +88,7 @@ class OllamaKnowledgeGraphExtractor:
         """
 
     def extract(self, text: str) -> KnowledgeGraph:
-        print("🤖 Extracting knowledge from text chunk using Ollama...")
+        print("Extracting knowledge from text chunk using Ollama...")
         try:
             prompt = self._generate_prompt(text)
             
@@ -100,10 +102,10 @@ class OllamaKnowledgeGraphExtractor:
             json_response = json.loads(response['message']['content'])
             graph = KnowledgeGraph.model_validate(json_response)
             
-            print(f"✅ Extracted {len(graph.nodes)} nodes and {len(graph.relationships)} relationships.")
+            print(f"Extracted {len(graph.nodes)} nodes and {len(graph.relationships)} relationships.")
             return graph
         except Exception as e:
-            print(f"❌ Error during Ollama extraction: {e}")
+            print(f"Error during Ollama extraction: {e}")
             return KnowledgeGraph(nodes=[], relationships=[])
 
 
@@ -117,7 +119,7 @@ class Neo4jDatabase:
         self.driver.close()
 
     def import_graph(self, graph: KnowledgeGraph):
-        print("💾 Importing graph into Neo4j...")
+        print("Importing graph into Neo4j...")
         with self.driver.session() as session:
             for node in graph.nodes:
                 node_label = node.__class__.__name__
@@ -131,15 +133,15 @@ class Neo4jDatabase:
                 MERGE (a)-[r:{rel.type}]->(b)
                 """
                 session.run(query, source_name=rel.source, target_name=rel.target)
-        print("✅ Graph import complete.")
+        print("Graph import complete.")
 
 
 def main():
     # --- CONFIGURATION ---
-    PROCESSED_JSON_FILENAME = "NVDA-Q1-2025_processed.json" # UPDATE THIS
-    NEO4J_URI = "bolt://localhost:7687"
-    NEO4J_USER = "neo4j"
-    NEO4J_PASSWORD = "your_neo4j_password" # UPDATE THIS
+    PROCESSED_JSON_FILENAME = "NVDA-Q1-2025_processed.json"
+    NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+    NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "your_neo4j_password")
     # ---------------------
 
     base_path = Path(__file__).resolve().parent.parent
@@ -159,7 +161,7 @@ def main():
             text_chunks.append(current_chunk.strip())
             current_chunk = ""
     
-    print(f"📄 Divided transcript into {len(text_chunks)} chunks.")
+    print(f"Divided transcript into {len(text_chunks)} chunks.")
 
     # Initialize tools with the new Ollama extractor
     extractor = OllamaKnowledgeGraphExtractor() # <-- THE ONLY CHANGE IN THIS SECTION
@@ -174,7 +176,7 @@ def main():
             db.import_graph(extracted_graph)
     
     db.close()
-    print("\n✨ All chunks processed. Knowledge graph construction is complete.")
+    print("\nAll chunks processed. Knowledge graph construction is complete.")
 
 
 if __name__ == "__main__":
