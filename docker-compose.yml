@@ -1,0 +1,12 @@
+version: "3.9"
+
+services:
+  multimodal-graph-rag:
+    build: .
+    container_name: multimodal-graph-rag
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python src/data_processing.py
+    # restart: unless-stopped

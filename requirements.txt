@@ -1,0 +1,9 @@
+PyMuPDF
+openai-whisper
+python-dotenv
+neo4j
+pydantic
+ollama
+torch
+torchvision
+torchaudio
