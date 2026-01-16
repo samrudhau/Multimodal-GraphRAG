@@ -81,6 +81,11 @@ class OllamaKnowledgeGraphExtractor:
           ]
         }}
         
+        Rules:
+        1. Produce ONLY JSON with the keys "nodes" and "relationships".
+        2. Never include explanations, comments, schema definitions or markdown.
+        3. Nodes must specify "type" so they can be mapped back to Pydantic models.
+        4. Infer relationships logically from the text.
         Here is the text to analyze:
         ---
         {text}
@@ -139,9 +144,9 @@ class Neo4jDatabase:
 def main():
     # --- CONFIGURATION ---
     PROCESSED_JSON_FILENAME = "NVDA-Q1-2025_processed.json"
-    NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-    NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "your_neo4j_password")
+    NEO4J_URI = os.getenv("NEO4J_URI")
+    NEO4J_USER = os.getenv("NEO4J_USER")
+    NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
     # ---------------------
 
     base_path = Path(__file__).resolve().parent.parent
@@ -152,16 +157,18 @@ def main():
 
     segments = data['whisper_transcription']['segments']
     
-    CHUNK_SIZE = 10 
-    text_chunks = []
-    current_chunk = ""
-    for i, segment in enumerate(segments):
-        current_chunk += segment['text'] + " "
-        if (i + 1) % CHUNK_SIZE == 0 or (i + 1) == len(segments):
-            text_chunks.append(current_chunk.strip())
-            current_chunk = ""
-    
-    print(f"Divided transcript into {len(text_chunks)} chunks.")
+    audio_segments = data["whisper_transcription"]["segments"]
+    audio_text = " ".join(seg["text"] for seg in audio_segments)
+
+    pdf_text = data.get("pdf_text", "")
+
+    merged = audio_text + "\n" + pdf_text
+
+    words = merged.split()
+    chunk_size = 800
+    text_chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+
+    print(f"Total multimodal chunks: {len(text_chunks)}")
 
     # Initialize tools with the new Ollama extractor
     extractor = OllamaKnowledgeGraphExtractor() # <-- THE ONLY CHANGE IN THIS SECTION
@@ -169,8 +176,8 @@ def main():
 
     # Process each chunk and import into Neo4j
     # We can now process more chunks since it's free! Let's do 10.
-    for i, chunk in enumerate(text_chunks[:10]):
-        print(f"\n--- Processing Chunk {i+1}/{len(text_chunks[:10])} ---")
+    for i, chunk in enumerate(text_chunks):
+        print(f"\n--- Processing Chunk {i+1}/{len(text_chunks)} ---")
         extracted_graph = extractor.extract(chunk)
         if extracted_graph.nodes:
             db.import_graph(extracted_graph)

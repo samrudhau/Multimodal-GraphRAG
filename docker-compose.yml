@@ -9,6 +9,8 @@ services:
       - "7687:7687"
     volumes:
       - neo4j_data:/data
+    networks:
+      - app-network
 
   ollama:
     image: ollama/ollama
@@ -17,30 +19,49 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    networks:
+      - app-network
 
   kg-builder-app:
     build: .
     container_name: kg-builder-app
+    command: tail -f /dev/null
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
     volumes:
       - ./data:/app/data
       - ./src:/app/src
-    environment:
-      - PYTHONUNBUFFERED=1
-      - NEO4J_URI=bolt://neo4j-db:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD_FILE=/run/secrets/neo4j_password
-      - OLLAMA_HOST=http://ollama:11434   # added this line
+    env_file:
+      - .env
     depends_on:
       - neo4j-db
       - ollama
-    secrets:
-      - neo4j_password
     networks:
       - app-network
 
-environment:
-  - OLLAMA_HOST=http://ollama:11434
+  api:
+    build: .
+    container_name: rag-api
+    command: uvicorn src.api:app --host 0.0.0.0 --port 8000
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - ./src:/app/src
+    env_file:
+      - .env
+    depends_on:
+      - kg-builder-app
+      - neo4j-db
+      - ollama
+    ports:
+      - "8000:8000"
+    networks:
+      - app-network
 
 volumes:
   neo4j_data:
   ollama_data:
+
+networks:
+  app-network:
+    external: false

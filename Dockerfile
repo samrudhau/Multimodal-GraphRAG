@@ -10,14 +10,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Cache-friendly dependency installation
 COPY requirements.txt .
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-RUN pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
-COPY . .
+# Copy source after dependencies
+COPY src ./src
+COPY data ./data
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["bash"]
+CMD ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000"]
