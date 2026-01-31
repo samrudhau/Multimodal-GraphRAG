@@ -1,23 +1,25 @@
-# ===== Dockerfile (CPU version) =====
+# Use a lightweight Python base image
 FROM python:3.10-slim
 
+# Set working directory inside the container
 WORKDIR /app
 
+# Install system dependencies (ffmpeg is required for Whisper audio processing)
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    libpoppler-cpp-dev \
     ffmpeg \
-    libgl1 \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy all project files
-COPY . /app
+# Copy requirements and install python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install dependencies
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# Copy the source code into the container
+COPY ./src ./src
+COPY ./data ./data
 
+# Expose the port the app will run on
+EXPOSE 8000
 
-# Run your main script when the container starts
-CMD ["python", "src/data_processing.py"]
+# Command to run the app (using FastAPI/Uvicorn for a robust backend)
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,6 @@
+﻿.env
+neo4j_db/
+data/processed/
+src/__pycache__/
+*.pyc
+data/neo4j/

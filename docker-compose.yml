@@ -1,12 +1,56 @@
-version: "3.9"
+version: '3.8'
 
 services:
-  multimodal-graph-rag:
-    build: .
-    container_name: multimodal-graph-rag
+  # --- Service 1: Neo4j Graph Database ---
+  neo4j:
+    image: neo4j:5.15
+    container_name: graphrag_db
+    ports:
+      - "7474:7474" # Browser UI
+      - "7687:7687" # Bolt Protocol
     volumes:
-      - ./data:/app/data
+      - ./neo4j_db/data:/data
+      - ./neo4j_db/logs:/logs
+      - ./neo4j_db/import:/var/lib/neo4j/import
+      - ./neo4j_db/plugins:/plugins
     environment:
-      - PYTHONUNBUFFERED=1
-    command: python src/data_processing.py
-    # restart: unless-stopped
+      - NEO4J_AUTH=${NEO4J_USERNAME}/${NEO4J_PASSWORD}
+      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
+      # Optimization for smaller cloud VMs (2GB RAM)
+      - NEO4J_server_memory_heap_initial__size=512M
+      - NEO4J_server_memory_heap_max__size=1G
+    networks:
+      - graphrag-net
+    healthcheck:
+      # We'll use a bash command that checks if the port is open
+      test: ["CMD-SHELL", "ls /var/lib/neo4j/bin/neo4j && /var/lib/neo4j/bin/neo4j status"]
+      interval: 10s    # Check every 10 seconds
+      timeout: 10s     # Wait 10 seconds for a response
+      retries: 10      # Try 10 times before giving up
+      start_period: 60s # IMPORTANT: Give it 60 seconds to boot before even checking
+
+  # --- Service 2: FastAPI GraphRAG Application ---
+  graphrag-app:
+    build: .
+    container_name: graphrag_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+    env_file:
+      - .env
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    networks:
+      - graphrag-net
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687 # Internal network hostname
+      - NEO4J_USERNAME=${NEO4J_USERNAME}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+
+networks:
+  graphrag-net:
+    driver: bridge

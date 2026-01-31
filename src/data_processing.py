@@ -1,110 +1,106 @@
-import whisper
 import fitz  # PyMuPDF
+import whisper
+import os
 import json
 from pathlib import Path
-import time
-import glob
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-def extract_text_from_pdf(pdf_path: Path) -> str:
-    """Extracts all text from a given PDF file."""
-    text = ""
-    print(f"📄 Extracting text from {pdf_path.name}...")
-    try:
-        with fitz.open(pdf_path) as doc:
-            for page in doc:
-                text += page.get_text()
-        print("✅ PDF text extraction complete.")
-        return text
-    except Exception as e:
-        print(f"❌ Error extracting text from PDF: {e}")
-        return ""
+class DataIngestion:
+    def __init__(self, raw_dir="data/raw", processed_dir="data/processed"):
+        self.data_dir = Path(raw_dir)
+        self.processed_dir = Path(processed_dir)
+        self.whisper_model = whisper.load_model("base")
+        
+        # Ensure the processed directory exists
+        self.processed_dir.mkdir(parents=True, exist_ok=True)
 
-def transcribe_audio(audio_path: Path, model_name: str = "base") -> dict:
-    """Transcribes an audio file using Whisper and returns the result."""
-    print(f"🎙️ Loading Whisper model '{model_name}'...")
-    model = whisper.load_model(model_name)
-    print(f"🔊 Transcribing {audio_path.name}... (This may take a while)")
-    result = model.transcribe(str(audio_path), verbose=True)
-    print("✅ Audio transcription complete.")
-    return result
+    def process_all_data(self):
+        """
+        Recursively walks through Company/Quarter folders.
+        Example Path: data/raw/NVIDIA/Q1-2025/report.pdf
+        """
+        all_chunks = []
+        
+        # 1. Recursively find all PDF and Audio files
+        # rglob("**/*") looks into every subfolder
+        for file_path in self.data_dir.rglob("*"):
+            if file_path.suffix.lower() not in ['.pdf', '.mp3', '.wav']:
+                continue
 
-def process_pair(audio_file: Path, pdf_file: Path, output_dir: Path):
-    """Process a single (audio, pdf) pair and save the result to JSON."""
-    start_time = time.time()
+            # 2. Extract Metadata from Folder Structure
+            # file_path.parts might look like: ('data', 'raw', 'NVIDIA', 'Q1-2025', 'transcript.pdf')
+            # We assume structure: data/raw/{Company}/{Quarter}/{file}
+            parts = file_path.relative_to(self.data_dir).parts
+            company = parts[0] if len(parts) > 1 else "Unknown"
+            quarter = parts[1] if len(parts) > 2 else "FullYear"
 
-    pdf_text = extract_text_from_pdf(pdf_file)
-    transcription_result = transcribe_audio(audio_file)
+            print(f"📂 Processing: {company} | {quarter} | {file_path.name}")
 
-    processed_data = {
-        "source_audio": audio_file.name,
-        "source_pdf": pdf_file.name,
-        "pdf_text": pdf_text,
-        "whisper_transcription": transcription_result
-    }
+            # 3. Process the file based on type
+            if file_path.suffix == '.pdf':
+                text = self._extract_pdf(file_path)
+                print("PDF text extraction complete.")
+                file_type = "pdf"
+            else:
+                text = self._transcribe_audio(file_path)
+                print("Audio transcription complete.")
+                file_type = "audio"
 
-    output_filename = f"{audio_file.stem}_processed.json"
-    output_path = output_dir / output_filename
+            # 4. Chunk and tag with metadata
+            file_chunks = self._chunk_text(text, file_path.name, company, quarter, file_type)
+            all_chunks.extend(file_chunks)
 
-    print(f"💾 Saving processed data to {output_path}...")
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(processed_data, f, ensure_ascii=False, indent=4)
+            # 3. Save to Processed Folder
+            self._save_to_processed(file_chunks, company, quarter, file_path.stem)
 
-    end_time = time.time()
-    print(f"✨ Finished {audio_file.name} in {end_time - start_time:.2f} seconds.")
-    print(f"👉 Output: {output_path}\n")
+        return all_chunks
+    def _save_to_processed(self, chunks, company, quarter, filename_stem):
+        """Saves chunks to data/processed/{Company}/{Quarter}/{filename}.json"""
+        target_dir = self.processed_dir / company / quarter
+        target_dir.mkdir(parents=True, exist_ok=True)
+        
+        target_file = target_dir / f"{filename_stem}.json"
+        
+        with open(target_file, 'w', encoding='utf-8') as f:
+            json.dump(chunks, f, indent=4)
+        print(f"💾 Saved processed chunks to: {target_file}")
+    
+    def _chunk_text(self, text, filename, company, quarter, file_type):
+        """
+        Smart splitting: Prevents mid-word cuts and maintains paragraph/sentence integrity.
+        """
+        # Initialize the 'Smart' Splitter
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,    # Target size
+            chunk_overlap=150,   # 'Context Bridge' - repeats the last 150 chars in the next chunk
+            separators=["\n\n", "\n", " ", ""] # Try to split by Para, then Line, then Space
+        )
+        
+        # Split the text smartly
+        raw_chunks = text_splitter.split_text(text)
+        
+        # Wrap in your metadata format
+        final_chunks = []
+        for chunk in raw_chunks:
+            final_chunks.append({
+                "text": chunk,
+                "source": filename,
+                "company": company,
+                "quarter": quarter,
+                "type": file_type
+            })
+        return final_chunks
 
-def main():
-    """Main function to process raw data files."""
-    base_path = Path(__file__).resolve().parent.parent
-    raw_data_path = base_path / "data" / "raw"
-    processed_data_path = base_path / "data" / "processed"
+    def _extract_pdf(self, path):
+        with fitz.open(path) as doc:
+            return "".join([page.get_text() for page in doc])
 
-    # ✅ Automatically find .mp3 and .pdf files, even in subfolders
-    audio_files = glob.glob(str(raw_data_path / "**/*.mp3"), recursive=True)
-    pdf_files = glob.glob(str(raw_data_path / "**/*.pdf"), recursive=True)
-
-    if not audio_files:
-        print("⚠️ No audio files found in data/raw/ or subdirectories.")
-        return
-    if not pdf_files:
-        print("⚠️ No PDF files found in data/raw/ or subdirectories.")
-        return
-
-    # Take the first audio and PDF file found
-    audio_file = Path(audio_files[0])
-    pdf_file = Path(pdf_files[0])
-
-    print(f"🎧 Found audio: {audio_file.name}")
-    print(f"📄 Found PDF: {pdf_file.name}")
-
-    processed_data_path.mkdir(exist_ok=True)
-
-    start_time = time.time()
-
-    # 1. Extract text from the official PDF transcript
-    pdf_text = extract_text_from_pdf(pdf_file)
-
-    # 2. Transcribe audio using Whisper
-    transcription_result = transcribe_audio(audio_file)
-
-    # 3. Structure and save the combined data
-    processed_data = {
-        "source_audio": audio_file.name,
-        "source_pdf": pdf_file.name,
-        "pdf_text": pdf_text,
-        "whisper_transcription": transcription_result
-    }
-
-    output_filename = f"{audio_file.stem}_processed.json"
-    output_path = processed_data_path / output_filename
-
-    print(f"💾 Saving processed data to {output_path}...")
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(processed_data, f, ensure_ascii=False, indent=4)
-
-    end_time = time.time()
-    print(f"✨ Processing complete in {end_time - start_time:.2f} seconds.")
-    print(f"👉 Your processed file is ready at: {output_path}")
+    def _transcribe_audio(self, path):
+        print(f"Loading Whisper model-'base'...")
+        return self.whisper_model.transcribe(str(path))["text"]
+    
 
 if __name__ == "__main__":
-    main()
+    ingestor = DataIngestion()
+    final_data = ingestor.process_all_data()
+    print(f"✅ Extracted and Saved {len(final_data)} total chunks across all companies.")

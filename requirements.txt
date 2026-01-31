@@ -1,9 +1,23 @@
-PyMuPDF
-openai-whisper
+# General
+fastapi
+uvicorn
 python-dotenv
+pandas
+
+# Data Processing
+pymupdf             # For PDFs
+openai-whisper      # For Audio
+pydub               # Audio manipulation
+langchain-text-splitters # For text chunking
+
+# Graph & Vector
 neo4j
-pydantic
-ollama
-torch
-torchvision
-torchaudio
+sentence-transformers
+langchain
+langchain-community
+langchain-experimental # Useful for graph transformation
+
+# LLM Interaction
+azure-ai-inference
+groq                # Highly recommended for free, fast cloud inference (Student plan friendly)
+openai              # Backup option
